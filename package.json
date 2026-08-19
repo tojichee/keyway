@@ -1,7 +1,8 @@
 {
-  "name": "viewing-matcher",
+  "name": "keyway",
   "private": true,
   "version": "1.0.0",
+  "description": "Matches client and seller availability to schedule property viewings, with automatic next-day fallback and WhatsApp confirmations. No backend, runs entirely in the browser.",
   "type": "module",
   "scripts": {
     "dev": "vite",

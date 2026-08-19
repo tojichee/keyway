@@ -39,7 +39,7 @@ function useGoogleFonts() {
 // ---------- persistence ----------
 // Uses the browser's own localStorage — works standalone, no Claude runtime
 // needed. Trade-off: data stays on this one device/browser only, no sync.
-const STORAGE_PREFIX = "viewing-matcher:";
+const STORAGE_PREFIX = "keyway:";
 
 function usePersisted(key, initial) {
   const fullKey = STORAGE_PREFIX + key;
@@ -320,7 +320,7 @@ function TopBar({ title, subtitle }) {
       <div className="flex items-center gap-2">
         <KeyRound size={20} color={C.brass} strokeWidth={2.25} />
         <span style={{ fontFamily: DISPLAY_FONT, color: "#F6F4EE" }} className="text-xl font-semibold tracking-tight">
-          Viewing Matcher
+          Keyway
         </span>
       </div>
       {subtitle && (

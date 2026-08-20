@@ -3,6 +3,14 @@ import {
   Users, Building2, CalendarDays, ListChecks, Plus, X, Check,
   Clock, Phone, KeyRound, AlertTriangle, Trash2, ArrowRight, MessageCircle,
 } from "lucide-react";
+import { initializeApp } from "firebase/app";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
+import { firebaseConfig } from "./firebaseConfig";
+
+const firebaseApp = initializeApp(firebaseConfig);
+const auth = getAuth(firebaseApp);
+const db = getFirestore(firebaseApp);
 
 // ---------- design tokens ----------
 const C = {
@@ -37,30 +45,71 @@ function useGoogleFonts() {
 }
 
 // ---------- persistence ----------
-// Uses the browser's own localStorage — works standalone, no Claude runtime
-// needed. Trade-off: data stays on this one device/browser only, no sync.
-const STORAGE_PREFIX = "keyway:";
+// Cloud-synced via Firebase Firestore, scoped by a short workspace code the
+// user enters once per device. Same code on two devices = same data. Auth is
+// anonymous (invisible sign-in) — it exists only so Firestore's security
+// rules can require "must be signed in" and block fully public scraping;
+// the actual data boundary is the workspace code itself.
+const WORKSPACE_KEY = "keyway:workspaceId";
+const CODE_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
 
-function usePersisted(key, initial) {
-  const fullKey = STORAGE_PREFIX + key;
-  const [value, setValue] = useState(() => {
-    try {
-      const raw = localStorage.getItem(fullKey);
-      return raw ? JSON.parse(raw) : initial;
-    } catch (e) {
-      return initial;
-    }
-  });
+function genWorkspaceCode() {
+  let id = "";
+  for (let i = 0; i < 8; i++) id += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return id;
+}
+
+function useWorkspace() {
+  const [workspaceId, setWorkspaceIdState] = useState(() => localStorage.getItem(WORKSPACE_KEY) || "");
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(fullKey, JSON.stringify(value));
-    } catch (e) {
-      // storage full or unavailable — fail silently, same as before
-    }
-  }, [value, fullKey]);
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) setAuthReady(true);
+      else signInAnonymously(auth).catch(() => {});
+    });
+    return unsub;
+  }, []);
 
-  return [value, setValue, true]; // localStorage is synchronous, so "loaded" is always true
+  function setWorkspaceId(id) {
+    localStorage.setItem(WORKSPACE_KEY, id);
+    setWorkspaceIdState(id);
+  }
+
+  return { workspaceId, setWorkspaceId, authReady };
+}
+
+function useCloudPersisted(workspaceId, authReady, key, initial) {
+  const [value, setValue] = useState(initial);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!workspaceId || !authReady) return;
+    let cancelled = false;
+    setLoaded(false);
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, "workspaces", workspaceId));
+        if (!cancelled) {
+          const data = snap.exists() ? snap.data() : {};
+          setValue(data[key] !== undefined ? data[key] : initial);
+        }
+      } catch (e) {
+        // couldn't load — keep default, still let the app render
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspaceId, authReady, key]);
+
+  useEffect(() => {
+    if (!loaded || !workspaceId || !authReady) return;
+    setDoc(doc(db, "workspaces", workspaceId), { [key]: value }, { merge: true }).catch(() => {});
+  }, [value, loaded, workspaceId, authReady, key]);
+
+  return [value, setValue, loaded];
 }
 
 // ---------- time helpers ----------
@@ -314,7 +363,7 @@ function ClientMatches({ client, onAddMatches, onRemoveMatch }) {
 }
 
 // ---------- generic bits ----------
-function TopBar({ title, subtitle }) {
+function TopBar({ title, subtitle, workspaceId }) {
   return (
     <div style={{ background: C.ink }} className="px-5 pt-6 pb-5 sticky top-0 z-10">
       <div className="flex items-center gap-2">
@@ -326,6 +375,12 @@ function TopBar({ title, subtitle }) {
       {subtitle && (
         <div style={{ color: "#AEB9C4", fontFamily: BODY_FONT }} className="text-sm mt-1">
           {subtitle}
+        </div>
+      )}
+      {workspaceId && (
+        <div style={{ color: "#7C8896", fontFamily: BODY_FONT }} className="text-xs mt-1">
+          Workspace code: <span style={{ color: C.brass, letterSpacing: "0.05em" }}>{workspaceId}</span>
+          {" "}(enter this on your other devices to sync)
         </div>
       )}
     </div>
@@ -762,12 +817,57 @@ function ViewingsTab({ viewings, setViewings, clients, listings }) {
   );
 }
 
+// ---------- workspace setup ----------
+function WorkspaceSetup({ onSet }) {
+  const [joinCode, setJoinCode] = useState("");
+  const newCode = useMemo(() => genWorkspaceCode(), []);
+
+  return (
+    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: BODY_FONT }}
+      className="max-w-md mx-auto flex flex-col items-center justify-center px-6 py-10">
+      <KeyRound size={28} color={C.brass} strokeWidth={2.25} className="mb-2" />
+      <div style={{ fontFamily: DISPLAY_FONT, color: C.text }} className="text-2xl font-semibold mb-1">Keyway</div>
+      <div style={{ color: C.muted }} className="text-sm mb-8 text-center max-w-xs">
+        Set up once per device so your data follows you everywhere.
+      </div>
+
+      <div style={{ background: C.card, borderColor: C.line }} className="border rounded-xl p-4 w-full mb-4">
+        <div style={{ fontFamily: DISPLAY_FONT, color: C.text }} className="font-semibold mb-1">First time?</div>
+        <div style={{ color: C.muted }} className="text-sm mb-3">
+          Create a new workspace. You'll get a code to enter on your other devices later.
+        </div>
+        <button onClick={() => onSet(newCode)} style={{ background: C.ink, color: "#fff" }}
+          className="w-full rounded-md py-2.5 text-sm font-medium active:opacity-85">
+          Create workspace
+        </button>
+      </div>
+
+      <div style={{ background: C.card, borderColor: C.line }} className="border rounded-xl p-4 w-full">
+        <div style={{ fontFamily: DISPLAY_FONT, color: C.text }} className="font-semibold mb-1">Already have a code?</div>
+        <div style={{ color: C.muted }} className="text-sm mb-3">
+          Enter the workspace code shown on your other device to sync the same data here.
+        </div>
+        <input value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+          placeholder="e.g. 7K2M9XQP" maxLength={8}
+          style={{ borderColor: C.line, letterSpacing: "0.1em" }}
+          className="w-full border rounded-md px-3 py-2 text-sm mb-2 text-center bg-white" />
+        <button onClick={() => joinCode.trim() && onSet(joinCode.trim())} disabled={!joinCode.trim()}
+          style={{ background: joinCode.trim() ? C.brass : C.line, color: "#fff" }}
+          className="w-full rounded-md py-2.5 text-sm font-medium active:opacity-85">
+          Join workspace
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- root ----------
 export default function App() {
   useGoogleFonts();
-  const [clients, setClients, cLoaded] = usePersisted("clients", []);
-  const [listings, setListings, lLoaded] = usePersisted("listings", []);
-  const [viewings, setViewings, vLoaded] = usePersisted("viewings", []);
+  const { workspaceId, setWorkspaceId, authReady } = useWorkspace();
+  const [clients, setClients, cLoaded] = useCloudPersisted(workspaceId, authReady, "clients", []);
+  const [listings, setListings, lLoaded] = useCloudPersisted(workspaceId, authReady, "listings", []);
+  const [viewings, setViewings, vLoaded] = useCloudPersisted(workspaceId, authReady, "viewings", []);
   const [tab, setTab] = useState("clients");
 
   const tabs = [
@@ -777,14 +877,21 @@ export default function App() {
     { id: "viewings", label: "Viewings", icon: ListChecks },
   ];
 
-  const ready = cLoaded && lLoaded && vLoaded;
+  if (!workspaceId) {
+    return <WorkspaceSetup onSet={setWorkspaceId} />;
+  }
+
+  const ready = authReady && cLoaded && lLoaded && vLoaded;
 
   return (
     <div style={{ background: C.paper, minHeight: "100vh", fontFamily: BODY_FONT }} className="max-w-md mx-auto relative">
-      <TopBar subtitle={`${clients.length} client${clients.length === 1 ? "" : "s"} · ${listings.length} listing${listings.length === 1 ? "" : "s"} · ${viewings.length} scheduled`} />
+      <TopBar
+        workspaceId={workspaceId}
+        subtitle={`${clients.length} client${clients.length === 1 ? "" : "s"} · ${listings.length} listing${listings.length === 1 ? "" : "s"} · ${viewings.length} scheduled`}
+      />
 
       {!ready ? (
-        <div className="py-20 text-center" style={{ color: C.muted, fontFamily: BODY_FONT }}>Loading…</div>
+        <div className="py-20 text-center" style={{ color: C.muted, fontFamily: BODY_FONT }}>Syncing…</div>
       ) : (
         <>
           {tab === "clients" && <ClientsTab clients={clients} setClients={setClients} />}

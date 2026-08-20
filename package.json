@@ -2,7 +2,7 @@
   "name": "keyway",
   "private": true,
   "version": "1.0.0",
-  "description": "Matches client and seller availability to schedule property viewings, with automatic next-day fallback and WhatsApp confirmations. No backend, runs entirely in the browser.",
+  "description": "Matches client and seller availability to schedule property viewings, with automatic next-day fallback and WhatsApp confirmations. Cloud-synced via Firebase.",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "firebase": "^10.12.2",
     "lucide-react": "^0.383.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

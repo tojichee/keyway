@@ -1,12 +1,9 @@
-// Paste the firebaseConfig object from Firebase Console here:
-// Project settings (gear icon) -> Your apps -> the web app you registered
-//
-// It looks like this (values below are placeholders -- replace them all):
+// Firebase config for the Keyway project (keyway-89e50)
 export const firebaseConfig = {
-  apiKey: "REPLACE_ME",
-  authDomain: "REPLACE_ME.firebaseapp.com",
-  projectId: "REPLACE_ME",
-  storageBucket: "REPLACE_ME.appspot.com",
-  messagingSenderId: "REPLACE_ME",
-  appId: "REPLACE_ME",
+  apiKey: "AIzaSyDYpKNc2-2GzYVXJUi5EGEYG7_IP-vDZwI",
+  authDomain: "keyway-89e50.firebaseapp.com",
+  projectId: "keyway-89e50",
+  storageBucket: "keyway-89e50.firebasestorage.app",
+  messagingSenderId: "74820722175",
+  appId: "1:74820722175:web:69454ea437c194b0bc5bca",
 };

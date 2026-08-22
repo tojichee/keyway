@@ -218,7 +218,7 @@ function lenientParseListings(text) {
 }
 
 function copyRequestPrompt(needs) {
-  return `Find current HDB resale listings in Singapore matching: "${needs}". Reply with ONLY a JSON array, each item: {"address":"","price":"","size":"","mrt":"","url":""}.`;
+  return `Find current Singapore property listings matching: "${needs}". Consider HDB resale, private condo, and landed — whichever fits the requirement, don't assume HDB. Reply with ONLY a JSON array, each item: {"address":"","price":"","size":"","mrt":"","url":""}.`;
 }
 
 async function copyText(text) {

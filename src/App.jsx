@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import {
   Users, Building2, CalendarDays, ListChecks, Plus, X, Check,
-  Clock, Phone, KeyRound, AlertTriangle, Trash2, ArrowRight, MessageCircle,
+  Clock, Phone, KeyRound, AlertTriangle, Trash2, ArrowRight, MessageCircle, Calculator,
 } from "lucide-react";
 import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
@@ -817,6 +817,224 @@ function ViewingsTab({ viewings, setViewings, clients, listings }) {
   );
 }
 
+// ---------- loan affordability calculator ----------
+// General MAS/IRAS framework, 2026. These are illustrative estimates, not a
+// bank's In-Principle Approval — figures vary by lender and individual
+// circumstances. Not financial or legal advice.
+const LTV_BY_COUNT = { 1: 0.75, 2: 0.45, 3: 0.35 };
+const ABSD_BY_STATUS = {
+  citizen: { 1: 0, 2: 0.20, 3: 0.30 },
+  pr: { 1: 0.05, 2: 0.30, 3: 0.30 },
+  foreigner: { 1: 0.60, 2: 0.60, 3: 0.60 },
+};
+const STATUS_LABELS = { citizen: "Singapore Citizen", pr: "Permanent Resident", foreigner: "Foreigner" };
+
+function calcBSD(price) {
+  const bands = [
+    { upTo: 180000, rate: 0.01 },
+    { upTo: 360000, rate: 0.02 },
+    { upTo: 1000000, rate: 0.03 },
+    { upTo: 1500000, rate: 0.04 },
+    { upTo: 3000000, rate: 0.05 },
+    { upTo: Infinity, rate: 0.06 },
+  ];
+  let remaining = price, prevCap = 0, bsd = 0;
+  for (const band of bands) {
+    const bandSize = band.upTo - prevCap;
+    const amount = Math.min(remaining, bandSize);
+    if (amount <= 0) break;
+    bsd += amount * band.rate;
+    remaining -= amount;
+    prevCap = band.upTo;
+  }
+  return bsd;
+}
+
+function maxLoanFromTDSR(grossMonthlyIncome, existingMonthlyDebt, tenureYears, stressRate = 0.04) {
+  const availableForMortgage = grossMonthlyIncome * 0.55 - existingMonthlyDebt;
+  if (availableForMortgage <= 0) return 0;
+  const r = stressRate / 12;
+  const n = tenureYears * 12;
+  return availableForMortgage * (Math.pow(1 + r, n) - 1) / (r * Math.pow(1 + r, n));
+}
+
+function fmtMoney(n) {
+  if (!isFinite(n) || n === null) return "—";
+  return "S$" + Math.round(n).toLocaleString("en-SG");
+}
+
+function LoanCalcTab() {
+  const [price, setPrice] = useState("");
+  const [status, setStatus] = useState("citizen");
+  const [count, setCount] = useState(1);
+  const [propType, setPropType] = useState("private");
+  const [income, setIncome] = useState("");
+  const [debt, setDebt] = useState("");
+  const [tenure, setTenure] = useState(30);
+
+  const priceNum = parseFloat(price) || 0;
+  const incomeNum = parseFloat(income) || 0;
+  const debtNum = parseFloat(debt) || 0;
+
+  const ltv = LTV_BY_COUNT[count];
+  const maxLoanLTV = priceNum * ltv;
+  const minDownpayment = priceNum - maxLoanLTV;
+  const minCashDownpayment = count === 1 ? priceNum * 0.05 : null;
+  const absdRate = ABSD_BY_STATUS[status][count];
+  const absd = priceNum * absdRate;
+  const bsd = calcBSD(priceNum);
+  const maxLoanTDSR = incomeNum > 0 ? maxLoanFromTDSR(incomeNum, debtNum, tenure) : null;
+  const bindingLoan = maxLoanTDSR !== null ? Math.min(maxLoanLTV, maxLoanTDSR) : null;
+  const tdsrIsBinding = bindingLoan !== null && maxLoanTDSR < maxLoanLTV;
+  const showLandedWarning = propType === "landed" && status !== "citizen";
+  const totalCashUpfront = minDownpayment + absd + bsd;
+
+  return (
+    <div className="px-4 pt-4 pb-24">
+      <div style={{ fontFamily: DISPLAY_FONT, color: C.text }} className="text-lg font-semibold mb-1">Loan &amp; affordability</div>
+      <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-3">
+        General MAS/IRAS framework — estimates only, not a bank approval.
+      </div>
+
+      <div style={{ background: C.card, borderColor: C.line }} className="border rounded-xl p-3 space-y-2 mb-4">
+        <div>
+          <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Property price</div>
+          <input type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
+            placeholder="e.g. 2600000" style={{ fontFamily: BODY_FONT, borderColor: C.line }}
+            className="w-full border rounded-md px-3 py-2 text-sm bg-white" />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Buyer status</div>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}
+              style={{ fontFamily: BODY_FONT, borderColor: C.line }} className="w-full border rounded-md px-2 py-2 text-sm bg-white">
+              <option value="citizen">Citizen</option>
+              <option value="pr">PR</option>
+              <option value="foreigner">Foreigner</option>
+            </select>
+          </div>
+          <div>
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Which property?</div>
+            <select value={count} onChange={(e) => setCount(Number(e.target.value))}
+              style={{ fontFamily: BODY_FONT, borderColor: C.line }} className="w-full border rounded-md px-2 py-2 text-sm bg-white">
+              <option value={1}>1st</option>
+              <option value={2}>2nd</option>
+              <option value={3}>3rd or more</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Property type</div>
+          <select value={propType} onChange={(e) => setPropType(e.target.value)}
+            style={{ fontFamily: BODY_FONT, borderColor: C.line }} className="w-full border rounded-md px-2 py-2 text-sm bg-white">
+            <option value="hdb">HDB</option>
+            <option value="private">Private condo</option>
+            <option value="landed">Landed</option>
+          </select>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Gross monthly income (optional)</div>
+            <input type="number" inputMode="decimal" value={income} onChange={(e) => setIncome(e.target.value)}
+              placeholder="e.g. 12000" style={{ fontFamily: BODY_FONT, borderColor: C.line }}
+              className="w-full border rounded-md px-2 py-2 text-sm bg-white" />
+          </div>
+          <div>
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs mb-1">Existing monthly debt</div>
+            <input type="number" inputMode="decimal" value={debt} onChange={(e) => setDebt(e.target.value)}
+              placeholder="e.g. 0" style={{ fontFamily: BODY_FONT, borderColor: C.line }}
+              className="w-full border rounded-md px-2 py-2 text-sm bg-white" />
+          </div>
+        </div>
+      </div>
+
+      {showLandedWarning && (
+        <div style={{ background: C.claySoft, borderColor: C.clay }} className="border rounded-xl p-3 mb-4">
+          <div className="flex items-center gap-2 mb-1">
+            <AlertTriangle size={16} color={C.clay} />
+            <span style={{ color: C.clay, fontFamily: BODY_FONT }} className="text-sm font-semibold">Eligibility check needed first</span>
+          </div>
+          <div style={{ color: C.text, fontFamily: BODY_FONT }} className="text-sm">
+            {status === "pr"
+              ? "Landed property on mainland Singapore needs approval from the Land Dealings Approval Unit (LDAU) for PRs — typically requires 5+ years of PR status and rarely granted. Confirm eligibility before financing matters."
+              : "Foreigners generally cannot buy landed property on mainland Singapore (Sentosa Cove is the one exception, with approval). This is a bigger blocker than financing."}
+          </div>
+        </div>
+      )}
+
+      {priceNum > 0 && (
+        <div style={{ background: C.card, borderColor: C.line }} className="border rounded-xl p-3 mb-4 space-y-2">
+          <div style={{ fontFamily: DISPLAY_FONT, color: C.text }} className="font-semibold text-sm mb-1">Estimated figures</div>
+
+          <div className="flex justify-between text-sm" style={{ fontFamily: BODY_FONT }}>
+            <span style={{ color: C.muted }}>Max loan ({Math.round(ltv * 100)}% LTV)</span>
+            <span style={{ color: C.text }} className="font-medium">{fmtMoney(maxLoanLTV)}</span>
+          </div>
+          <div className="flex justify-between text-sm" style={{ fontFamily: BODY_FONT }}>
+            <span style={{ color: C.muted }}>Min. downpayment</span>
+            <span style={{ color: C.text }} className="font-medium">{fmtMoney(minDownpayment)}</span>
+          </div>
+          {minCashDownpayment !== null && (
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs -mt-1">
+              At least {fmtMoney(minCashDownpayment)} of that must be cash (5%); rest can be CPF or cash.
+            </div>
+          )}
+          <div className="flex justify-between text-sm" style={{ fontFamily: BODY_FONT }}>
+            <span style={{ color: C.muted }}>Est. ABSD ({Math.round(absdRate * 100)}%, {STATUS_LABELS[status]})</span>
+            <span style={{ color: C.text }} className="font-medium">{fmtMoney(absd)}</span>
+          </div>
+          <div className="flex justify-between text-sm" style={{ fontFamily: BODY_FONT }}>
+            <span style={{ color: C.muted }}>Est. BSD</span>
+            <span style={{ color: C.text }} className="font-medium">{fmtMoney(bsd)}</span>
+          </div>
+          {(absd > 0) && (
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs -mt-1">
+              ABSD is cash, due within 14 days of signing — banks won't lend against it.
+            </div>
+          )}
+
+          <div style={{ borderTop: `1px solid ${C.line}` }} className="pt-2 flex justify-between text-sm">
+            <span style={{ color: C.text, fontFamily: BODY_FONT }} className="font-medium">Total cash/CPF needed upfront</span>
+            <span style={{ color: C.brassDeep, fontFamily: BODY_FONT }} className="font-semibold">{fmtMoney(totalCashUpfront)}</span>
+          </div>
+
+          {propType === "hdb" && (
+            <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs pt-1">
+              For HDB/EC, an additional MSR cap (30% of income, mortgage only) also applies on top of TDSR.
+            </div>
+          )}
+
+          {maxLoanTDSR !== null && (
+            <>
+              <div style={{ borderTop: `1px solid ${C.line}` }} className="pt-2 flex justify-between text-sm">
+                <span style={{ color: C.muted, fontFamily: BODY_FONT }}>Max loan by income (TDSR 55%, {tenure}yr, 4% stress)</span>
+                <span style={{ color: C.text, fontFamily: BODY_FONT }} className="font-medium">{fmtMoney(maxLoanTDSR)}</span>
+              </div>
+              <div style={{ background: tdsrIsBinding ? C.claySoft : C.sageSoft, borderColor: tdsrIsBinding ? C.clay : C.sage }}
+                className="border rounded-md p-2 mt-1">
+                <div style={{ color: tdsrIsBinding ? C.clay : C.sage, fontFamily: BODY_FONT }} className="text-xs font-medium">
+                  {tdsrIsBinding
+                    ? `Income is the binding limit — actual max loan is ${fmtMoney(bindingLoan)}, lower than the LTV cap.`
+                    : `LTV is the binding limit — income comfortably supports the ${fmtMoney(maxLoanLTV)} LTV cap.`}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div style={{ color: C.muted, fontFamily: BODY_FONT }} className="text-xs">
+        These are general estimates from the MAS/IRAS framework, not a lender's approval — actual figures vary by
+        bank and individual circumstances. Not financial or legal advice. For a real number, get an In-Principle
+        Approval (IPA) from a bank or mortgage broker.
+      </div>
+    </div>
+  );
+}
+
 // ---------- workspace setup ----------
 function WorkspaceSetup({ onSet }) {
   const [joinCode, setJoinCode] = useState("");
@@ -875,6 +1093,7 @@ export default function App() {
     { id: "listings", label: "Listings", icon: Building2 },
     { id: "schedule", label: "Schedule", icon: CalendarDays },
     { id: "viewings", label: "Viewings", icon: ListChecks },
+    { id: "loancalc", label: "Loan Calc", icon: Calculator },
   ];
 
   if (!workspaceId) {
@@ -918,6 +1137,7 @@ export default function App() {
                 {tab === "listings" && <ListingsTab listings={listings} setListings={setListings} />}
                 {tab === "schedule" && <ScheduleTab clients={clients} listings={listings} viewings={viewings} setViewings={setViewings} />}
                 {tab === "viewings" && <ViewingsTab viewings={viewings} setViewings={setViewings} clients={clients} listings={listings} />}
+                {tab === "loancalc" && <LoanCalcTab />}
               </>
             )}
           </div>

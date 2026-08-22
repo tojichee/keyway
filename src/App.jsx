@@ -884,24 +884,48 @@ export default function App() {
   const ready = authReady && cLoaded && lLoaded && vLoaded;
 
   return (
-    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: BODY_FONT }} className="max-w-md mx-auto relative">
+    <div style={{ background: C.paper, minHeight: "100vh", fontFamily: BODY_FONT }}>
       <TopBar
         workspaceId={workspaceId}
         subtitle={`${clients.length} client${clients.length === 1 ? "" : "s"} · ${listings.length} listing${listings.length === 1 ? "" : "s"} · ${viewings.length} scheduled`}
       />
 
-      {!ready ? (
-        <div className="py-20 text-center" style={{ color: C.muted, fontFamily: BODY_FONT }}>Syncing…</div>
-      ) : (
-        <>
-          {tab === "clients" && <ClientsTab clients={clients} setClients={setClients} />}
-          {tab === "listings" && <ListingsTab listings={listings} setListings={setListings} />}
-          {tab === "schedule" && <ScheduleTab clients={clients} listings={listings} viewings={viewings} setViewings={setViewings} />}
-          {tab === "viewings" && <ViewingsTab viewings={viewings} setViewings={setViewings} clients={clients} listings={listings} />}
-        </>
-      )}
+      <div className="md:flex md:max-w-5xl md:mx-auto">
+        {/* Sidebar nav — tablet landscape / laptop only, replaces the bottom bar */}
+        <nav className="hidden md:flex md:flex-col md:w-52 md:flex-shrink-0 md:py-6 md:px-3 md:gap-1">
+          {tabs.map((t) => {
+            const Icon = t.icon;
+            const active = tab === t.id;
+            return (
+              <button key={t.id} onClick={() => setTab(t.id)}
+                style={{ background: active ? C.card : "transparent", color: active ? C.text : C.muted, fontFamily: BODY_FONT }}
+                className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-left active:opacity-80">
+                <Icon size={18} color={active ? C.brass : C.muted} />
+                {t.label}
+              </button>
+            );
+          })}
+        </nav>
 
-      <div style={{ background: C.ink, borderTop: `1px solid ${C.inkLight}` }} className="fixed bottom-0 left-0 right-0 max-w-md mx-auto flex">
+        {/* Main content */}
+        <div className="flex-1 min-w-0 md:py-6 md:px-6">
+          <div className="max-w-md md:max-w-2xl mx-auto">
+            {!ready ? (
+              <div className="py-20 text-center" style={{ color: C.muted, fontFamily: BODY_FONT }}>Syncing…</div>
+            ) : (
+              <>
+                {tab === "clients" && <ClientsTab clients={clients} setClients={setClients} />}
+                {tab === "listings" && <ListingsTab listings={listings} setListings={setListings} />}
+                {tab === "schedule" && <ScheduleTab clients={clients} listings={listings} viewings={viewings} setViewings={setViewings} />}
+                {tab === "viewings" && <ViewingsTab viewings={viewings} setViewings={setViewings} clients={clients} listings={listings} />}
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom tab bar — phone only */}
+      <div style={{ background: C.ink, borderTop: `1px solid ${C.inkLight}` }} className="md:hidden fixed bottom-0 left-0 right-0 max-w-md mx-auto flex">
         {tabs.map((t) => {
           const Icon = t.icon;
           const active = tab === t.id;
